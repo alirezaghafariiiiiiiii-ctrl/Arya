@@ -29,5 +29,13 @@ class ConversationOnlyTest(unittest.TestCase):
         text = "\u0627\u06cc\u0646 \u06a9\u062f \u0627\u0633\u062a: " + BT + "print(1)" + BT
         self.assertEqual(conversation_only(text), REFUSAL)
 
+    def test_build_request_detected(self):
+        from arya_core.guard import is_build_request
+        self.assertTrue(is_build_request("یه بازی برام بساز"))
+        self.assertTrue(is_build_request("کد بنویس"))
+        self.assertTrue(is_build_request("write me a script"))
+        self.assertFalse(is_build_request("امروز حالت چطوره؟"))
+
+
 if __name__ == "__main__":
     unittest.main()

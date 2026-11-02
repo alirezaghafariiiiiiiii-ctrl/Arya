@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .guard import conversation_only
+from .guard import conversation_only, is_build_request, BUILD_REFUSAL
 
 import logging
 from collections import deque
@@ -178,6 +178,9 @@ class ConversationEngine:
             return NO_MODEL_MESSAGE
 
         user_message = self._message("user", text)
+        if is_build_request(text):
+            return BUILD_REFUSAL
+
         if self.session_store is not None and self.session_id is not None:
             self.session_store.add_message(self.session_id, "user", text)
         self.history.append(user_message)
