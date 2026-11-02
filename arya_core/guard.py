@@ -1,6 +1,6 @@
 REFUSAL = (
-    "I can only chat here, not write code or images. "
-    "Ask me about building things if you like."
+    "من اینجا فقط گفتگو می‌کنم و کد یا تصویر نمی‌سازم. "
+    "اگر خواستی، دربارهٔ ساختن چیزها با هم حرف می‌زنیم."
 )
 
 _BT = chr(96) * 3

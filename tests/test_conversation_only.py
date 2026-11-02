@@ -18,5 +18,16 @@ class ConversationOnlyTest(unittest.TestCase):
     def test_image_refused(self):
         self.assertEqual(conversation_only(IMG), REFUSAL)
 
+    def test_persian_plain_chat_passes(self):
+        text = "\u0633\u0644\u0627\u0645\u060c \u0686\u0647 \u062e\u0628\u0631\u061f"
+        self.assertEqual(conversation_only(text), text)
+
+    def test_refusal_is_persian(self):
+        self.assertTrue(any("\u0600" <= c <= "\u06ff" for c in REFUSAL))
+
+    def test_persian_text_with_code_block_refused(self):
+        text = "\u0627\u06cc\u0646 \u06a9\u062f \u0627\u0633\u062a: " + BT + "print(1)" + BT
+        self.assertEqual(conversation_only(text), REFUSAL)
+
 if __name__ == "__main__":
     unittest.main()
