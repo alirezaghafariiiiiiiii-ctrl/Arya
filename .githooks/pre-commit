@@ -1,0 +1,6 @@
+#!/bin/bash
+
+if git diff --cached --name-only | grep -E '\.(sqlite3|db|bak|gguf|env)$'; then
+  echo "ERROR: refusing to commit sensitive files"
+  exit 1
+fi
