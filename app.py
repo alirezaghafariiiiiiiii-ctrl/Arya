@@ -1,46 +1,46 @@
 import os
-import requests
+import threading
+
 import gradio as gr
+
+from arya_core.config import DB_PATH, MODEL_PATH, SESSION_DB
+from arya_core.engine import ConversationEngine
+from arya_core.memory import MemoryStore
+from arya_core.providers import LocalProvider, OllamaProvider
+from arya_core.sessions import SessionStore
 
 OWNER_USER = os.environ.get("ARYA_OWNER_USER", "")
 OWNER_PASSWORD = os.environ.get("ARYA_OWNER_PASSWORD", "")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 
-SYSTEM_PROMPT = """
-تو آریا هستی؛ دستیار شخصی و فارسی‌زبان مالک.
-با احترام، صمیمی و روشن پاسخ بده.
-اطلاعات محرمانه را افشا نکن.
-"""
+
+def build_provider():
+    name = os.environ.get("ARIA_PROVIDER", "local").lower()
+    if name == "ollama":
+        return OllamaProvider(model=os.environ.get("ARIA_MODEL", "llama3.2"))
+    return LocalProvider(model_path=MODEL_PATH)
+
+
+_lock = threading.Lock()
+_memory = MemoryStore(DB_PATH)
+_sessions = SessionStore(SESSION_DB)
+_session_id = _sessions.get_latest_session() or _sessions.create_session()
+_engine = ConversationEngine(
+    build_provider(),
+    _memory,
+    session_store=_sessions,
+    session_id=_session_id,
+)
 
 
 def chat(message, history):
-    if not OPENROUTER_API_KEY:
-        return "کلید OpenRouter در تنظیمات Render تنظیم نشده است."
-
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for item in history or []:
-        if isinstance(item, dict) and item.get("role") in ("user", "assistant"):
-            content = item.get("content")
-            if isinstance(content, str):
-                messages.append({"role": item["role"], "content": content})
-    messages.append({"role": "user", "content": message})
-
+    if not isinstance(message, str) or not message.strip():
+        return "لطفاً یک پیام بنویس."
     try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={"model": MODEL, "messages": messages},
-            timeout=60,
-        )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        print(f"OpenRouter error: {e}")
-        return "ارتباط با سرویس هوش مصنوعی برقرار نشد. تنظیمات را بررسی کن."
+        with _lock:
+            return _engine.generate_response(message)
+    except Exception as error:
+        print(f"Arya error: {error}")
+        return "مشکلی پیش آمد. دوباره تلاش کن."
 
 
 configured = bool(OWNER_USER and OWNER_PASSWORD)
@@ -49,15 +49,15 @@ if configured:
     demo = gr.ChatInterface(
         fn=chat,
         type="messages",
-        title="آریا | دستیار شخصی",
-        description="ورود خصوصی مالک",
+        title="آریا | گفتگو",
+        description="فقط گفتگو",
     )
 else:
     demo = gr.Interface(
-        fn=lambda m: "ابتدا ARYA_OWNER_USER و ARYA_OWNER_PASSWORD را در Render تنظیم کن.",
+        fn=lambda m: "ابتدا ARYA_OWNER_USER و ARYA_OWNER_PASSWORD را تنظیم کن.",
         inputs=gr.Textbox(label="پیام"),
-        outputs=gr.Textbox(label="وضعیت"),
-        title="Arya — Setup Required",
+        outputs=gr.Textbox(label="پاسخ"),
+        title="Arya - Setup Required",
     )
 
 demo.queue()

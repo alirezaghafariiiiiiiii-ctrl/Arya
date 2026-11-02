@@ -9,9 +9,5 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
-      - key: OPENROUTER_API_KEY
-        sync: false
-      - key: OPENROUTER_MODEL
-        value: openrouter/free
-      - key: AI_PERSONALITY
-        value: "تو آریا هستی؛ دستیار فارسی‌زبان دوستانه، دقیق، صبور و کاربردی. پاسخ‌ها را مرحله‌به‌مرحله بده و چیزی را جعل نکن."
+      - key: ARIA_PROVIDER
+        value: local
