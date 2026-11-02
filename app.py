@@ -1,68 +1,59 @@
-import os
-import threading
-
 import gradio as gr
-
-from arya_core.config import DB_PATH, MODEL_PATH, SESSION_DB
-from arya_core.engine import ConversationEngine
+import os
+from arya_core.config import DB_PATH, MODEL_PATH
 from arya_core.memory import MemoryStore
-from arya_core.providers import LocalProvider, OllamaProvider
-from arya_core.sessions import SessionStore
+from arya_core.engine import ConversationEngine
+from arya_core.providers import LocalProvider
 
-OWNER_USER = os.environ.get("ARYA_OWNER_USER", "")
-OWNER_PASSWORD = os.environ.get("ARYA_OWNER_PASSWORD", "")
+# لود کردن مدل و حافظه فقط یک بار در ابتدای اجرا
+print("در حال بیدار کردن آریا...")
+provider = LocalProvider(model_path=MODEL_PATH)
+memory = MemoryStore(DB_PATH)
+engine = ConversationEngine(provider=provider, memory=memory)
 
-
-def build_provider():
-    name = os.environ.get("ARIA_PROVIDER", "local").lower()
-    if name == "ollama":
-        return OllamaProvider(model=os.environ.get("ARIA_MODEL", "llama3.2"))
-    return LocalProvider(model_path=MODEL_PATH)
-
-
-_lock = threading.Lock()
-_memory = MemoryStore(DB_PATH)
-_sessions = SessionStore(SESSION_DB)
-_session_id = _sessions.get_latest_session() or _sessions.create_session()
-_engine = ConversationEngine(
-    build_provider(),
-    _memory,
-    session_store=_sessions,
-    session_id=_session_id,
-)
-
-
-def chat(message, history):
-    if not isinstance(message, str) or not message.strip():
-        return "لطفاً یک پیام بنویس."
+def chat_response(message, history):
+    # ارسال پیام کاربر به موتور اصلی آریا
     try:
-        with _lock:
-            return _engine.generate_response(message)
-    except Exception as error:
-        print(f"Arya error: {error}")
-        return "مشکلی پیش آمد. دوباره تلاش کن."
+        response = engine.generate_response(message)
+        return response
+    except Exception as e:
+        return f"خطا در سیستم: {e}"
 
+def reset_chat():
+    engine.reset()
+    return None, "تاریخچه مکالمه پاک شد."
 
-configured = bool(OWNER_USER and OWNER_PASSWORD)
+# طراحی رابط کاربری
+with gr.Blocks(title="Arya AI", theme=gr.themes.Soft()) as demo:
+    gr.Markdown("# 🌿 آریا (ARIA)")
+    gr.Markdown("دستیار هوشمند مستقل و فارسی‌زبان شما")
+    
+    chatbot = gr.Chatbot(height=500, type="messages")
+    
+    with gr.Row():
+        msg = gr.Textbox(
+            show_label=False,
+            placeholder="پیام خود را بنویسید...",
+            container=False,
+            scale=4
+        )
+        submit_btn = gr.Button("ارسال", scale=1, variant="primary")
+        
+    with gr.Row():
+        reset_btn = gr.Button("پاک کردن تاریخچه (/reset)")
+        
+    def respond(message, chat_history):
+        if not message.strip():
+            return "", chat_history
+        bot_message = chat_response(message, chat_history)
+        chat_history.append({"role": "user", "content": message})
+        chat_history.append({"role": "assistant", "content": bot_message})
+        return "", chat_history
 
-if configured:
-    demo = gr.ChatInterface(
-        fn=chat,
-        type="messages",
-        title="آریا | گفتگو",
-        description="فقط گفتگو",
-    )
-else:
-    demo = gr.Interface(
-        fn=lambda m: "ابتدا ARYA_OWNER_USER و ARYA_OWNER_PASSWORD را تنظیم کن.",
-        inputs=gr.Textbox(label="پیام"),
-        outputs=gr.Textbox(label="پاسخ"),
-        title="Arya - Setup Required",
-    )
+    # اتصال دکمه‌ها به توابع
+    msg.submit(respond, [msg, chatbot], [msg, chatbot])
+    submit_btn.click(respond, [msg, chatbot], [msg, chatbot])
+    reset_btn.click(reset_chat, None, [chatbot, msg])
 
-demo.queue()
-demo.launch(
-    server_name="0.0.0.0",
-    server_port=int(os.environ.get("PORT", 10000)),
-    auth=(OWNER_USER, OWNER_PASSWORD) if configured else None,
-)
+if __name__ == "__main__":
+    demo.launch(server_name="0.0.0.0", server_port=7860)

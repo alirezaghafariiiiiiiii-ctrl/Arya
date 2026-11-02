@@ -3,6 +3,10 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
+class MemoryItem:
+    def __init__(self, text):
+        self.text = text
+
 class MemoryStore:
     def __init__(self, db_path):
         self.db_path = db_path
@@ -17,7 +21,7 @@ class MemoryStore:
 
     def _get_model(self):
         if self._model is None:
-            print("⏳ در حال بارگذاری مدل حافظه معنایی (فقط بار اول کمی طول می‌کشد)...")
+            print("⏳ لود مدل حافظه معنایی...")
             self._model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
         return self._model
 
@@ -27,14 +31,9 @@ class MemoryStore:
                 CREATE TABLE IF NOT EXISTS core_memories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     text TEXT NOT NULL,
-                    embedding BLOB,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    embedding BLOB
                 )
             """)
-            try:
-                conn.execute("ALTER TABLE core_memories ADD COLUMN embedding BLOB")
-            except sqlite3.OperationalError:
-                pass
             conn.commit()
 
     def add(self, text):
@@ -45,43 +44,35 @@ class MemoryStore:
 
         with sqlite3.connect(self.db_path) as conn:
             existing = conn.execute("SELECT 1 FROM core_memories WHERE text = ?", (text,)).fetchone()
-            if existing:
-                return
-            conn.execute("INSERT INTO core_memories (text, embedding) VALUES (?, ?)", (text, embedding_bytes))
-            conn.commit()
+            if not existing:
+                conn.execute("INSERT INTO core_memories (text, embedding) VALUES (?, ?)", (text, embedding_bytes))
+                conn.commit()
 
-    def search(self, query, top_k=3):
+    def search(self, query, top_k=3, limit=None):
+        if limit is not None:
+            top_k = limit
         model = self._get_model()
         query_embedding = model.encode([query])[0].reshape(1, -1)
 
         with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT id, text, embedding FROM core_memories").fetchall()
+            rows = conn.execute("SELECT text, embedding FROM core_memories").fetchall()
 
         if not rows: return []
 
-        texts = []
-        embeddings = []
-        for row in rows:
-            if row["embedding"]: 
-                texts.append(row["text"])
-                embeddings.append(np.frombuffer(row["embedding"], dtype=np.float32))
+        texts, embeddings = [], []
+        for text, emb in rows:
+            if emb:
+                texts.append(text)
+                embeddings.append(np.frombuffer(emb, dtype=np.float32))
 
         if not embeddings: return []
 
-        embeddings_matrix = np.vstack(embeddings)
-        similarities = cosine_similarity(query_embedding, embeddings_matrix)[0]
+        similarities = cosine_similarity(query_embedding, np.vstack(embeddings))[0]
         top_indices = similarities.argsort()[-top_k:][::-1]
 
-        results = []
-        for idx in top_indices:
-            if similarities[idx] > 0.35:
-                results.append(texts[idx])
-        return results
+        return [MemoryItem(texts[idx]) for idx in top_indices if similarities[idx] > 0.35]
 
     def list_all(self):
-        class MemoryItem:
-            def __init__(self, text): self.text = text
         with sqlite3.connect(self.db_path) as conn:
             rows = conn.execute("SELECT text FROM core_memories ORDER BY id").fetchall()
         return [MemoryItem(r[0]) for r in rows]
