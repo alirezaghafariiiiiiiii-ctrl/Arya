@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .guard import conversation_only
+
 import logging
 from collections import deque
 from dataclasses import dataclass
@@ -202,6 +204,7 @@ class ConversationEngine:
         if not isinstance(reply, str) or not reply.strip():
             raise RuntimeError("Provider returned an invalid response")
 
+        reply = conversation_only(reply)
         assistant_message = self._message("assistant", reply)
         if self.session_store is not None and self.session_id is not None:
             self.session_store.add_message(
