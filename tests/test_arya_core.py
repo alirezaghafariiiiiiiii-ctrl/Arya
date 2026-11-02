@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from arya_core.engine import ConversationEngine, NO_MODEL_MESSAGE
 from arya_core.memory import MemoryStore
+from arya_core.persona import Persona
 from arya_core.providers import EchoProvider, LocalProvider, Provider, ProviderError
 from arya_core.sessions import SessionStore
 
@@ -102,6 +103,21 @@ class TestMemory(Base):
 
 
 class TestEngine(Base):
+    def test_persona_yaml_is_formatted_as_a_prompt(self):
+        persona = Persona(Path(__file__).parents[1] / "config" / "persona.yaml")
+
+        prompt = persona.to_prompt()
+
+        self.assertIn("تو «آریا» هستی", prompt)
+        self.assertIn("لحن: صمیمی، مستقیم، کوتاه", prompt)
+        self.assertIn(
+            "پرهیز کن از: تعارف اضافه، پاسخ‌های طولانی بی‌دلیل، تکرار سؤال کاربر",
+            prompt,
+        )
+        self.assertIn("ارزش‌ها: صداقت، اختصار، همدلی", prompt)
+        self.assertIn("یادم می‌مونه", prompt)
+        self.assertIn("نمی‌دانم", prompt)
+
     def test_default_personality_is_casual_honest_and_concise(self):
         provider = RecordingProvider()
         engine = ConversationEngine(provider, self.memory)
@@ -110,10 +126,13 @@ class TestEngine(Base):
 
         self.assertIn("نامت آریا است", provider.system)
         self.assertIn("صمیمی، مستقیم و محترمانه", provider.system)
-        self.assertIn("اگر چیزی را نمی‌دانی، روشن بگو", provider.system)
+        self.assertIn("با همدلی موقعیت کاربر را درک کن", provider.system)
+        self.assertIn("سؤالش را بی‌دلیل تکرار نکن", provider.system)
+        self.assertIn("صریح بگو «نمی‌دانم»", provider.system)
+        self.assertIn("با «شاید» ابهام نساز", provider.system)
         self.assertIn("همیشه کاربر را با «تو» خطاب کن", provider.system)
         self.assertIn("چطور می‌تونم کمکت کنم؟", provider.system)
-        self.assertIn("فقط یک بار کوتاه تأییدش کن", provider.system)
+        self.assertIn("فقط یک بار کوتاه مثل «یادم می‌مونه» تأییدش کن", provider.system)
 
     def test_persisted_session_resumes_and_reset_starts_a_new_one(self):
         sessions = SessionStore(self.path)
