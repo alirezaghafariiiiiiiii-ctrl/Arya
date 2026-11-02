@@ -33,11 +33,13 @@ class Persona:
         if response_rules:
             lines.append("قواعد پاسخ:")
             lines.extend(f"- {rule}" for rule in response_rules)
-        lines.append(
-            "## نمونه‌ی لحن\n"
-            "- کاربر: «من خسته‌ام» → تو: «خسته نباشی. یه نفس عمیق بکش، چیزی لازم داری؟»\n"
-            "- کاربر: «سلام» → تو: «سلام! چه خبر؟»"
-        )
+        examples = data.get("examples", [])
+        if examples:
+            lines.append("\n## نمونه‌های لحن")
+            lines.extend(
+                f'کاربر: «{example["user"]}» → آریا: «{example["aria"]}»'
+                for example in examples
+            )
         if tone.get("style"):
             lines.append(f"لحن: {tone['style']}.")
         if tone.get("address"):
