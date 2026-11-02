@@ -447,3 +447,28 @@ class TestSessionStore(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestEngineGuard(Base):
+    def test_code_reply_is_blocked(self):
+        from arya_core.guard import REFUSAL
+
+        bt = chr(96) * 3
+
+        class CodeProvider(Provider):
+            def chat(self, system_prompt, messages):
+                return bt + "python print(1) " + bt
+
+        engine = ConversationEngine(CodeProvider(), self.memory)
+        reply = engine.generate_response("write code")
+        self.assertEqual(reply, REFUSAL)
+        history = engine.get_history()
+        self.assertFalse(any(bt in str(m) for m in history))
+
+    def test_plain_reply_passes_through(self):
+        class PlainProvider(Provider):
+            def chat(self, system_prompt, messages):
+                return "hello there"
+
+        engine = ConversationEngine(PlainProvider(), self.memory)
+        self.assertEqual(engine.generate_response("hi"), "hello there")
