@@ -143,6 +143,7 @@ class TestEngine(Base):
         self.assertIn("اول به سؤال کاربر پاسخ بده", prompt)
         self.assertIn("اگر سؤال اطلاعاتی است (کی/چی/کجا)", prompt)
         self.assertIn("شعر و آرایه فقط وقتی مناسب است", prompt)
+        self.assertIn("پاسخ‌های مربوط به هویت خودت را در حداکثر دو جمله بده", prompt)
         self.assertIn(
             "\n## نمونه‌های لحن\n"
             "کاربر: «تو کی هستی؟» → آریا: «من آریا هستم، دستیار فارسی‌زبانت.»\n"
@@ -414,6 +415,7 @@ class TestLocalProvider(unittest.TestCase):
                     {"role": "user", "content": "سلام"},
                 ],
             )
+            self.assertEqual(provider.llm.request["temperature"], 0.3)
             self.assertEqual(provider.llm.options["n_threads"], 2)
 
 

@@ -108,7 +108,7 @@ class LocalProvider(Provider):
                 {"role": "system", "content": system_prompt},
                 *messages,
             ],
-            temperature=0.7,
+            temperature=0.3,
             top_p=0.9,
             max_tokens=512,
         )
