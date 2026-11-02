@@ -102,6 +102,19 @@ class TestMemory(Base):
 
 
 class TestEngine(Base):
+    def test_default_personality_is_casual_honest_and_concise(self):
+        provider = RecordingProvider()
+        engine = ConversationEngine(provider, self.memory)
+
+        engine.generate_response("سلام")
+
+        self.assertIn("نامت آریا است", provider.system)
+        self.assertIn("صمیمی، مستقیم و محترمانه", provider.system)
+        self.assertIn("اگر چیزی را نمی‌دانی، روشن بگو", provider.system)
+        self.assertIn("همیشه کاربر را با «تو» خطاب کن", provider.system)
+        self.assertIn("چطور می‌تونم کمکت کنم؟", provider.system)
+        self.assertIn("فقط یک بار کوتاه تأییدش کن", provider.system)
+
     def test_persisted_session_resumes_and_reset_starts_a_new_one(self):
         sessions = SessionStore(self.path)
         try:
