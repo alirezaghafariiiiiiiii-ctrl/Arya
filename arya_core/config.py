@@ -18,3 +18,4 @@ MODEL_PATH = Path(
         MODELS_DIR / "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
     )
 )
+PERSONA_PATH = Path(os.getenv("ARIA_PERSONA", Path(__file__).parent / "persona.yaml"))

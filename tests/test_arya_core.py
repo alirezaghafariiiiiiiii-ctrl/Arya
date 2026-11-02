@@ -121,7 +121,15 @@ class TestEngine(Base):
 
             prompt = Persona(path).to_prompt()
 
-        self.assertEqual(prompt, "تو «آریا» هستی — دستیار فارسی‌زبان.")
+        self.assertEqual(
+            prompt,
+            "تو «آریا» هستی — دستیار فارسی‌زبان.\n"
+            "هرگاه از تو پرسیدند «تو کی هستی؟» یا مشابه آن، بگو: "
+            "«من آریا هستم، دستیار فارسی‌زبانت.»\n"
+            "## نمونه‌ی لحن\n"
+            "- کاربر: «من خسته‌ام» → تو: «خسته نباشی. یه نفس عمیق بکش، چیزی لازم داری؟»\n"
+            "- کاربر: «سلام» → تو: «سلام! چه خبر؟»",
+        )
 
     def test_persona_yaml_is_formatted_as_a_prompt(self):
         persona = Persona(PERSONA_PATH)
@@ -129,6 +137,21 @@ class TestEngine(Base):
         prompt = persona.to_prompt()
 
         self.assertIn("تو «آریا» هستی", prompt)
+        self.assertIn(
+            "هرگاه از تو پرسیدند «تو کی هستی؟» یا مشابه آن، بگو: "
+            "«من آریا هستم، دستیار فارسی‌زبانت.»",
+            prompt,
+        )
+        self.assertIn("قواعد پاسخ:", prompt)
+        self.assertIn("اول به سؤال کاربر پاسخ بده", prompt)
+        self.assertIn("اگر سؤال اطلاعاتی است (کی/چی/کجا)", prompt)
+        self.assertIn("شعر و آرایه فقط وقتی مناسب است", prompt)
+        self.assertIn(
+            "## نمونه‌ی لحن\n"
+            "- کاربر: «من خسته‌ام» → تو: «خسته نباشی. یه نفس عمیق بکش، چیزی لازم داری؟»\n"
+            "- کاربر: «سلام» → تو: «سلام! چه خبر؟»",
+            prompt,
+        )
         self.assertIn("لحن: صمیمی، مستقیم، کوتاه", prompt)
         self.assertIn(
             "پرهیز کن از: تعارف اضافه، پاسخ‌های طولانی بی‌دلیل، تکرار سؤال کاربر",
