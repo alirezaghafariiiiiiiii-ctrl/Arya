@@ -12,10 +12,17 @@
 از ریشهٔ مخزن اجرا کن:
 
 ```bash
+# حالت پیش‌فرض: EchoProvider (برای تست جریان برنامه، بدون مدل واقعی)
 python main.py
+
+# مدل محلی
+ARIA_PROVIDER=local python main.py
+
+# مسیر دلخواه برای پایگاه حافظه
+ARIA_DB=data/arya_memory.sqlite3 python main.py
 ```
 
-به‌طور پیش‌فرض ارائه‌دهندهٔ Echo برای آزمایش حافظه استفاده می‌شود. برای اتصال به Ollama محلی:
+برای اتصال به Ollama محلی:
 
 ```bash
 ARIA_PROVIDER=ollama python main.py
