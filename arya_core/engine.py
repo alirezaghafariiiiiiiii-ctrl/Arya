@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol, Sequence
 
+from .config import PERSONA_PATH
 from .memory import MemoryStore
+from .persona import Persona
 from .providers import Provider, ProviderError
 from .sessions import SessionStore
 
@@ -112,8 +114,15 @@ class ConversationEngine:
 
         self.provider = provider
         self.memory = memory if isinstance(memory, MemoryStore) else MemoryStore()
+        self.persona = Persona(PERSONA_PATH) if PERSONA_PATH.exists() else None
         self.base_system_prompt = (
-            personality.strip() if personality is not None else system_prompt.strip()
+            personality.strip()
+            if personality is not None
+            else (
+                ""
+                if self.persona is not None and system_prompt == DEFAULT_SYSTEM_PROMPT
+                else system_prompt.strip()
+            )
         )
         self.max_recalled = max_recalled
         self.max_history = max_history
@@ -231,12 +240,17 @@ class ConversationEngine:
 
     def _build_system_prompt(self, user_text: str) -> str:
         recalled = self.memory.search(user_text, limit=self.max_recalled)
-        block = (
+        memories = (
             "\n".join(f"- {item.text}" for item in recalled)
             if recalled
             else "دانسته‌ی مرتبطی درباره‌ی این سؤال پیدا نشد."
         )
-        return f"{self.base_system_prompt}\n\n{MEMORY_INSTRUCTIONS.format(memories=block)}"
+        blocks = [
+            self.persona.to_prompt() if self.persona is not None else "",
+            MEMORY_INSTRUCTIONS.format(memories=memories),
+            self.base_system_prompt,
+        ]
+        return "\n\n".join(block for block in blocks if block)
 
     def _handle_command(self, text: str) -> str:
         parts = text.split(maxsplit=1)

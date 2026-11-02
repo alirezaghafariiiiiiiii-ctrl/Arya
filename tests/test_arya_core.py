@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from arya_core.engine import ConversationEngine, NO_MODEL_MESSAGE
+from arya_core.engine import DEFAULT_SYSTEM_PROMPT, ConversationEngine, NO_MODEL_MESSAGE
+from arya_core.config import PERSONA_PATH
 from arya_core.memory import MemoryStore
 from arya_core.persona import Persona
 from arya_core.providers import EchoProvider, LocalProvider, Provider, ProviderError
@@ -103,8 +104,27 @@ class TestMemory(Base):
 
 
 class TestEngine(Base):
+    def test_persona_reports_missing_file_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.yaml"
+
+            with self.assertRaisesRegex(FileNotFoundError, str(path)):
+                Persona(path)
+
+    def test_persona_omits_optional_prompt_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "persona.yaml"
+            path.write_text(
+                "name: آریا\nidentity: دستیار فارسی‌زبان\ntone: {}\n",
+                encoding="utf-8",
+            )
+
+            prompt = Persona(path).to_prompt()
+
+        self.assertEqual(prompt, "تو «آریا» هستی — دستیار فارسی‌زبان.")
+
     def test_persona_yaml_is_formatted_as_a_prompt(self):
-        persona = Persona(Path(__file__).parents[1] / "config" / "persona.yaml")
+        persona = Persona(PERSONA_PATH)
 
         prompt = persona.to_prompt()
 
@@ -118,21 +138,33 @@ class TestEngine(Base):
         self.assertIn("یادم می‌مونه", prompt)
         self.assertIn("نمی‌دانم", prompt)
 
-    def test_default_personality_is_casual_honest_and_concise(self):
+    def test_default_personality_comes_from_persona_yaml(self):
         provider = RecordingProvider()
         engine = ConversationEngine(provider, self.memory)
 
         engine.generate_response("سلام")
 
-        self.assertIn("نامت آریا است", provider.system)
-        self.assertIn("صمیمی، مستقیم و محترمانه", provider.system)
-        self.assertIn("با همدلی موقعیت کاربر را درک کن", provider.system)
-        self.assertIn("سؤالش را بی‌دلیل تکرار نکن", provider.system)
-        self.assertIn("صریح بگو «نمی‌دانم»", provider.system)
-        self.assertIn("با «شاید» ابهام نساز", provider.system)
-        self.assertIn("همیشه کاربر را با «تو» خطاب کن", provider.system)
-        self.assertIn("چطور می‌تونم کمکت کنم؟", provider.system)
-        self.assertIn("فقط یک بار کوتاه مثل «یادم می‌مونه» تأییدش کن", provider.system)
+        persona_prompt = Persona(PERSONA_PATH).to_prompt()
+        self.assertTrue(provider.system.startswith(persona_prompt))
+
+    def test_persona_prompt_precedes_memory_and_custom_style(self):
+        engine = ConversationEngine(
+            RecordingProvider(), self.memory, system_prompt="سبک سفارشی"
+        )
+
+        prompt = engine._build_system_prompt("سلام")
+
+        self.assertLess(prompt.index("تو «آریا» هستی"), prompt.index("اطلاعات:"))
+        self.assertLess(prompt.index("اطلاعات:"), prompt.index("سبک سفارشی"))
+
+    def test_missing_persona_file_uses_builtin_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing_path = Path(directory) / "missing.yaml"
+            with patch("arya_core.engine.PERSONA_PATH", missing_path):
+                engine = ConversationEngine(RecordingProvider(), self.memory)
+
+        self.assertIsNone(engine.persona)
+        self.assertIn(DEFAULT_SYSTEM_PROMPT, engine._build_system_prompt("سلام"))
 
     def test_persisted_session_resumes_and_reset_starts_a_new_one(self):
         sessions = SessionStore(self.path)
