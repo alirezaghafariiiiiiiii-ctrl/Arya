@@ -10,7 +10,7 @@ def build_provider():
     name = os.getenv("ARIA_PROVIDER", "").lower()
     if name == "local" or (name == "" and MODEL_PATH.exists()):
         print(f"✨ استفاده از مدل محلی: {MODEL_PATH.name}")
-        return LocalProvider(model_path=MODEL_PATH)
+        return LocalProvider(model_path=MODEL_PATH, n_threads=4)
     print("⚠️ مدل پیدا نشد. استفاده از EchoProvider")
     return EchoProvider()
 

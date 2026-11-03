@@ -144,3 +144,55 @@ def _local_chat_stream(self, system_prompt, messages):
 
 
 LocalProvider.chat_stream = _local_chat_stream
+
+
+_orig_local_init = LocalProvider.__init__
+
+
+def _init_with_warmup(self, *args, **kwargs):
+    _orig_local_init(self, *args, **kwargs)
+    try:
+        self.llm.create_chat_completion(messages=[{"role": "user", "content": "سلام"}], max_tokens=1)
+    except Exception:
+        pass
+
+
+LocalProvider.__init__ = _init_with_warmup
+
+
+import os as _os
+import time as _time
+
+if _os.getenv("ARIA_DEBUG"):
+    _orig_cs = LocalProvider.chat_stream
+
+    def _dbg_cs(self, system_prompt, messages):
+        text = system_prompt + " ".join(m["content"] for m in messages)
+        n = len(self.llm.tokenize(text.encode("utf-8")))
+        t = _time.time()
+        first = True
+        count = 0
+        for piece in _orig_cs(self, system_prompt, messages):
+            if first:
+                print("\n[DEBUG] prompt ~%d tokens, first piece after %.1fs" % (n, _time.time() - t))
+                first = False
+            count += 1
+            yield piece
+        print("\n[DEBUG] %d pieces, total %.1fs" % (count, _time.time() - t))
+
+    LocalProvider.chat_stream = _dbg_cs
+
+
+_prev_init = LocalProvider.__init__
+
+
+def _init_cached(self, *args, **kwargs):
+    _prev_init(self, *args, **kwargs)
+    try:
+        from llama_cpp import LlamaRAMCache
+        self.llm.set_cache(LlamaRAMCache(capacity_bytes=512 * 1024 * 1024))
+    except Exception:
+        pass
+
+
+LocalProvider.__init__ = _init_cached

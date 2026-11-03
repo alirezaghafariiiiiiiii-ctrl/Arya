@@ -81,6 +81,13 @@ class NoProviderConfiguredError(RuntimeError):
     pass
 
 
+def _warm_up(memory):
+    try:
+        memory._get_model()
+    except Exception:
+        pass
+
+
 class ConversationEngine:
     """Conversation engine with persistent memory and memory commands."""
 
@@ -116,6 +123,7 @@ class ConversationEngine:
 
         self.provider = provider
         self.memory = memory if isinstance(memory, MemoryStore) else MemoryStore()
+        _warm_up(self.memory)
         self.persona = Persona(PERSONA_PATH) if PERSONA_PATH.exists() else None
         self.base_system_prompt = (
             personality.strip()
@@ -256,8 +264,8 @@ class ConversationEngine:
         )
         blocks = [
             self.persona.to_prompt() if self.persona is not None else "",
-            MEMORY_INSTRUCTIONS.format(memories=memories),
             self.base_system_prompt,
+            MEMORY_INSTRUCTIONS.format(memories=memories),
         ]
         return "\n\n".join(block for block in blocks if block)
 
@@ -328,3 +336,32 @@ MEMORY_INSTRUCTIONS = MEMORY_INSTRUCTIONS.replace(
     "{memories}",
     "فقط وقتی کاربر مستقیم درباره‌ی خودش می‌پرسد از این اطلاعات استفاده کن. در سلام و گفتگوی عادی به آن‌ها اشاره نکن.\n{memories}",
 )
+
+
+_orig_extract = ConversationEngine._extract_facts
+
+
+def _extract_if_statement(self, user_text):
+    t = user_text.strip()
+    if len(_re.findall(r"[\u0600-\u06FF]{2,}", t)) < 4 or _is_smalltalk(t):
+        return
+    return _orig_extract(self, user_text)
+
+
+ConversationEngine._extract_facts = _extract_if_statement
+
+
+_orig_engine_init = ConversationEngine.__init__
+
+
+def _init_prewarm(self, *args, **kwargs):
+    _orig_engine_init(self, *args, **kwargs)
+    try:
+        sp = self._build_system_prompt("سلام")
+        for _ in self.provider.chat_stream(sp, [{"role": "user", "content": "سلام"}]):
+            break
+    except Exception:
+        pass
+
+
+ConversationEngine.__init__ = _init_prewarm
