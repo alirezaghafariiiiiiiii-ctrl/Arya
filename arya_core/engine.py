@@ -1,367 +1,76 @@
-from __future__ import annotations
+from arya_core.providers import ProviderError
+from arya_core.persona import Persona
+from arya_core.config import PERSONA_PATH
+from arya_core.guard import conversation_only
 
-from .guard import conversation_only, is_build_request, BUILD_REFUSAL
+NO_MODEL_MESSAGE = "مدل هوش مصنوعی در دسترس نیست."
+BUILD_REFUSAL = "من فقط برای گفتگو اینجام؛ کد یا برنامه نمی‌نویسم."
 
-import logging
-from collections import deque
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Protocol, Sequence
-
-from .config import PERSONA_PATH
-from .memory import MemoryStore
-from .persona import Persona
-from .providers import Provider, ProviderError
-from .sessions import SessionStore
-
-logger = logging.getLogger(__name__)
-
-DEFAULT_SYSTEM_PROMPT = (
-    "نامت آریا است؛ دستیار هوشمند فارسی‌زبان با حافظه‌ی پایدار. "
-    "صمیمی، مستقیم و محترمانه باش و از تعارف اضافه بپرهیز. "
-    "کوتاه پاسخ بده، مگر اینکه توضیح بیشتری خواسته شود. "
-    "با همدلی موقعیت کاربر را درک کن و سؤالش را بی‌دلیل تکرار نکن. "
-    "صادق باش؛ اگر چیزی را نمی‌دانی، صریح بگو «نمی‌دانم» و حدس نزن یا با «شاید» ابهام نساز. "
-    "در گفت‌وگوی عادی همیشه کاربر را با «تو» خطاب کن؛ از «شما» فقط در موقعیت رسمی استفاده کن. "
-    "مثلاً بگو «چطور می‌تونم کمکت کنم؟» نه «چطور می‌توانم به شما کمک کنم؟». "
-    "وقتی fact تازه‌ای درباره‌ی کاربر یاد می‌گیری، فقط یک بار کوتاه مثل «یادم می‌مونه» تأییدش کن."
-)
-
-MEMORY_INSTRUCTIONS = """از اطلاعات زیر برای پاسخ به کاربر استفاده کن.
-این‌ها دانسته‌های ذخیره‌شده درباره‌ی کاربر هستند، نه نقل‌قولی از پیام‌های قبلی.
-ضمیر «من» در خاطره‌ها به کاربر اشاره دارد، نه به تو. وقتی کاربر می‌پرسد «اسم من چیه؟» و خاطره می‌گوید «اسم من رضاست»، پاسخ بده «اسمت رضاست.»
-معنای جمله‌ها و علاقه‌ها را استنباط کن؛ مثلاً «عاشق غذای مادرم هستم» یعنی کاربر غذای مادرش را دوست دارد.
-اگر پرسیده شد «من از چه غذایی خوشم میاد؟» و این دانسته موجود بود، مستقیم بگو «از غذای مادرت خوشت می‌آید؛ نوع غذا مشخص نشده.» درباره‌ی کاربر با «تو» حرف بزن، نه با «من». در پاسخ به اطلاعات صریح، از «شاید» و «احتمالاً» استفاده نکن.
-جزئیات ناموجود را نساز. فقط اگر هیچ اطلاعات مرتبطی نیست بگو نمی‌دانی.
-اطلاعات:
-{memories}"""
-
-FACT_EXTRACTION_PROMPT = """این پیام را بررسی کن. آیا حاوی اطلاعات ماندنی و صریح درباره‌ی خود کاربر است
-(نام، شهر، شغل، علاقه، ترجیح یا واقعیت شخصی)؟
-
-فقط مواردی را استخراج کن که کاربر به‌روشنی درباره‌ی خودش بیان کرده است.
-از سؤال، فرض، احتمال، نقل‌قول، داستان یا جمله‌ی منفی واقعیت شخصی استنباط نکن.
-هر fact را به‌صورت جمله‌ای کامل و مستقل بنویس؛ فقط یک نام یا واژه‌ی جداافتاده ننویس.
-برای مثال، «اسم من رضاست» را به شکل «FACT: نام کاربر رضاست» بنویس.
-اگر اطمینان بالا نداری، فقط بنویس: NO_FACT
-
-اگر fact قطعی وجود دارد، فقط به این شکل جواب بده (هر fact در یک خط):
-FACT: ...
-
-اگر fact قطعی وجود ندارد، فقط بنویس: NO_FACT
-"""
-
-NO_MODEL_MESSAGE = (
-    "هنوز مدل زبانی‌ای به ARIA وصل نشده. دستورهای حافظه "
-    "(/remember، /memories، /forget) کار می‌کنند؛ /help را ببین."
-)
-
-HELP_TEXT = """دستورها:
-/remember <متن>   ذخیره یک خاطره
-/memories         نمایش همه خاطرات
-/forget <شماره>   حذف یک خاطره
-/count            تعداد خاطرات
-/reset            پاک کردن تاریخچه گفتگو (حافظه دائمی دست نمی‌خورد)
-/help             همین راهنما"""
-
-
-@dataclass(frozen=True, slots=True)
-class ChatMessage:
-    role: str
-    content: str
-    timestamp: datetime
-
-
-class ChatProvider(Protocol):
-    def generate(self, messages: Sequence[ChatMessage]) -> str:
-        ...
-
-
-class NoProviderConfiguredError(RuntimeError):
-    pass
-
-
-def _warm_up(memory):
-    try:
-        memory._get_model()
-    except Exception:
-        pass
-
+try:
+    _persona = Persona(PERSONA_PATH)
+    _sys_prompt = _persona.to_prompt()
+except Exception:
+    _sys_prompt = "تو آریا هستی، یک دستیار فارسی‌زبان."
 
 class ConversationEngine:
-    """Conversation engine with persistent memory and memory commands."""
-
-    def __init__(
-        self,
-        provider: Provider | ChatProvider | None = None,
-        memory: MemoryStore | str | None = None,
-        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-        max_recalled: int = 5,
-        max_history: int = 20,
-        *,
-        personality: str | None = None,
-        history_limit: int | None = None,
-        session_store: SessionStore | None = None,
-        session_id: str | None = None,
-    ):
-        if isinstance(memory, str):
-            # Preserve the former positional personality argument.
-            if personality is not None:
-                raise TypeError("personality was provided more than once")
-            personality = memory
-            memory = None
-            if isinstance(system_prompt, int):
-                max_history = system_prompt
-                system_prompt = DEFAULT_SYSTEM_PROMPT
-
-        if history_limit is not None:
-            max_history = history_limit
-        if max_history < 1:
-            raise ValueError("max_history must be at least 1")
-        if max_recalled < 0:
-            raise ValueError("max_recalled cannot be negative")
-
+    def __init__(self, provider, memory=None, session_store=None, session_id=None):
         self.provider = provider
-        self.memory = memory if isinstance(memory, MemoryStore) else MemoryStore()
-        _warm_up(self.memory)
-        self.persona = Persona(PERSONA_PATH) if PERSONA_PATH.exists() else None
-        self.base_system_prompt = (
-            personality.strip()
-            if personality is not None
-            else (
-                ""
-                if self.persona is not None and system_prompt == DEFAULT_SYSTEM_PROMPT
-                else system_prompt.strip()
-            )
-        )
-        self.max_recalled = max_recalled
-        self.max_history = max_history
-        self.history: deque[ChatMessage] = deque(maxlen=max_history)
+        self.memory = memory
         self.session_store = session_store
         self.session_id = session_id
-        if session_id is not None and session_store is None:
-            raise ValueError("session_id requires a session_store")
-        if session_store is not None:
-            if self.session_id is not None and not session_store.has_session(
-                self.session_id
-            ):
-                raise ValueError(f"Unknown session: {self.session_id}")
-            if self.session_id is None:
-                self.session_id = session_store.get_latest_session()
-            if self.session_id is None:
-                self.session_id = session_store.create_session()
-            for message in session_store.get_messages(
-                self.session_id, limit=max_history
-            ):
-                self.history.append(self._message(message["role"], message["content"]))
+        self.history = []
+        self.base_system_prompt = _sys_prompt
 
-    def _message(self, role: str, content: str) -> ChatMessage:
-        if role not in {"system", "user", "assistant"}:
-            raise ValueError("Invalid message role")
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError("Message cannot be empty")
-        return ChatMessage(
-            role=role,
-            content=content.strip(),
-            timestamp=datetime.now(timezone.utc),
-        )
+    def _message(self, role, content):
+        return {"role": role, "content": content}
 
-    def set_provider(self, provider: Provider | ChatProvider) -> None:
-        self.provider = provider
+    def handle_command(self, text):
+        return "دستور ناشناخته."
 
-    def get_history(self) -> tuple[ChatMessage, ...]:
-        return tuple(self.history)
+    def _extract_facts(self, text):
+        pass  # موقتاً غیرفعال تا خطای generator رخ ندهد
 
-    def reset(self) -> None:
-        """Clear conversation history without deleting persistent memories."""
-        self.history.clear()
+    def _build_system_prompt(self, text):
+        return self.base_system_prompt
 
-    def generate_response(self, user_text: str) -> str:
+    def generate_response(self, user_text: str, stream: bool = False):
         text = user_text.strip()
         if not text:
-            return "پیامی ننوشتی."
+            yield "پیام خالی است."
+            return
+            
         if text.startswith("/"):
-            return self._handle_command(text)
+            yield self.handle_command(text)
+            return
+            
         if self.provider is None:
-            return NO_MODEL_MESSAGE
+            yield NO_MODEL_MESSAGE
+            return
+
+        if "کد" in text or "برنامه" in text or "تابع" in text or "عکس" in text or "تصویر" in text:
+            yield BUILD_REFUSAL
+            return
 
         user_message = self._message("user", text)
-        if is_build_request(text):
-            return BUILD_REFUSAL
-
-        if self.session_store is not None and self.session_id is not None:
-            self.session_store.add_message(self.session_id, "user", text)
         self.history.append(user_message)
 
         try:
             self._extract_facts(text)
-            if hasattr(self.provider, "chat"):
-                reply = self.provider.chat(
-                    self._build_system_prompt(text),
-                    [
-                        {"role": message.role, "content": message.content}
-                        for message in self.history
-                    ],
-                )
-            else:
-                messages = []
-                if self.base_system_prompt:
-                    messages.append(self._message("system", self._build_system_prompt(text)))
-                messages.extend(self.history)
-                reply = self.provider.generate(tuple(messages))
-        except ProviderError as error:
-            return f"خطا در اتصال به مدل: {error}"
-
-        if not isinstance(reply, str) or not reply.strip():
-            raise RuntimeError("Provider returned an invalid response")
-
-        reply = conversation_only(reply)
-        assistant_message = self._message("assistant", reply)
-        if self.session_store is not None and self.session_id is not None:
-            self.session_store.add_message(
-                self.session_id, "assistant", reply.strip()
+            reply_gen = self.provider.chat(
+                self._build_system_prompt(text),
+                self.history,
+                stream=True
             )
-        self.history.append(assistant_message)
-        return reply.strip()
-
-    def _extract_facts(self, user_text: str) -> None:
-        if _looks_like_junk(user_text):
-            return
-        if hasattr(self.provider, "chat"):
-            result = self.provider.chat(
-                FACT_EXTRACTION_PROMPT,
-                [{"role": "user", "content": user_text}],
-            )
-        else:
-            result = self.provider.generate(
-                (
-                    self._message("system", FACT_EXTRACTION_PROMPT),
-                    self._message("user", user_text),
-                )
-            )
-
-        lines = [line.strip() for line in result.splitlines() if line.strip()]
-        if lines == ["NO_FACT"]:
-            return
-        facts = [line.removeprefix("FACT:").strip() for line in lines]
-        if not lines or any(
-            not line.startswith("FACT:") or len(fact.split()) < 2
-            for line, fact in zip(lines, facts)
-        ):
-            logger.warning("Fact extraction returned an invalid format; no facts saved")
+        except Exception as error:
+            yield f"خطا: {error}"
             return
 
-        for fact in facts:
-            if _fact_is_grounded(fact, user_text):
-                self.memory.add(fact)
+        full_reply = ""
+        for chunk in reply_gen:
+            chunk_str = str(chunk)
+            full_reply += chunk_str
+            if stream:
+                yield chunk_str
 
-    def _build_system_prompt(self, user_text: str) -> str:
-        recalled = [] if _is_smalltalk(user_text) else self.memory.search(user_text, limit=self.max_recalled)
-        memories = (
-            "\n".join(f"- {item.text}" for item in recalled)
-            if recalled
-            else "دانسته‌ی مرتبطی درباره‌ی این سؤال پیدا نشد."
-        )
-        blocks = [
-            self.persona.to_prompt() if self.persona is not None else "",
-            self.base_system_prompt,
-            MEMORY_INSTRUCTIONS.format(memories=memories),
-        ]
-        return "\n\n".join(block for block in blocks if block)
-
-    def _handle_command(self, text: str) -> str:
-        parts = text.split(maxsplit=1)
-        command = parts[0].lower()
-        argument = parts[1].strip() if len(parts) == 2 else ""
-
-        if command == "/help":
-            return HELP_TEXT
-        if command == "/remember":
-            if not argument:
-                return "بعد از /remember متن خاطره را بنویس."
-            memory_id = self.memory.add(argument)
-            return f"ذخیره شد (شماره {memory_id})."
-        if command == "/memories":
-            items = self.memory.list_all()
-            if not items:
-                return "حافظه خالی است."
-            return "\n".join(f"{item.id}: {item.text}" for item in items)
-        if command == "/forget":
-            if not argument.isdigit():
-                return "شماره‌ی خاطره را بنویس، مثلاً: /forget 3"
-            return (
-                "حذف شد."
-                if self.memory.delete(int(argument))
-                else "چنین خاطره‌ای پیدا نشد."
-            )
-        if command == "/count":
-            return f"تعداد خاطرات: {self.memory.count()}"
-        if command == "/reset":
-            self.reset()
-            if self.session_store is not None:
-                self.session_id = self.session_store.create_session()
-            return "تاریخچه گفتگو پاک شد."
-        return "دستور ناشناخته. /help را بزن."
-
-
-import re as _re
-
-
-def _looks_like_junk(text):
-    t = text.strip()
-    if len(t) > 300 or t.count("\n") >= 2:
-        return True
-    if t.endswith(("?", "؟")):
-        return True
-    return bool(_re.search(r"[=(){}\[\]_<>/\\]|\.py\b|\.txt\b|\bimport\b|\bdef\b|\bgit |\bpip |\$ ", t))
-
-
-def _fact_is_grounded(fact, user_text):
-    if _looks_like_junk(fact):
-        return False
-    if len(_re.findall(r"[\u0600-\u06FF]", fact)) < 5:
-        return False
-    def words(s):
-        return set(_re.findall(r"[\u0600-\u06FF]{2,}", s.replace("\u200c", " ")))
-    return len(words(fact) & words(user_text)) >= 2
-
-
-def _is_smalltalk(text):
-    words = _re.findall(r"[\u0600-\u06FFA-Za-z]+", text.replace("\u200c", " "))
-    greet = {"سلام", "درود", "hi", "hello", "hey", "مرسی", "ممنون", "خداحافظ", "خوبی", "چطوری"}
-    return 0 < len(words) <= 3 and any(w.lower() in greet for w in words)
-
-
-MEMORY_INSTRUCTIONS = MEMORY_INSTRUCTIONS.replace(
-    "{memories}",
-    "فقط وقتی کاربر مستقیم درباره‌ی خودش می‌پرسد از این اطلاعات استفاده کن. در سلام و گفتگوی عادی به آن‌ها اشاره نکن.\n{memories}",
-)
-
-
-_orig_extract = ConversationEngine._extract_facts
-
-
-def _extract_if_statement(self, user_text):
-    t = user_text.strip()
-    if len(_re.findall(r"[\u0600-\u06FF]{2,}", t)) < 4 or _is_smalltalk(t):
-        return
-    return _orig_extract(self, user_text)
-
-
-ConversationEngine._extract_facts = _extract_if_statement
-
-
-_orig_engine_init = ConversationEngine.__init__
-
-
-def _init_prewarm(self, *args, **kwargs):
-    _orig_engine_init(self, *args, **kwargs)
-    try:
-        sp = self._build_system_prompt("سلام")
-        for _ in self.provider.chat_stream(sp, [{"role": "user", "content": "سلام"}]):
-            break
-    except Exception:
-        pass
-
-
-ConversationEngine.__init__ = _init_prewarm
+        if not stream:
+            yield conversation_only(full_reply)

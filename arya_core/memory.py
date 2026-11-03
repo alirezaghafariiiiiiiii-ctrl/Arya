@@ -4,8 +4,9 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 class MemoryItem:
-    def __init__(self, text):
+    def __init__(self, text, id=None):
         self.text = text
+        self.id = id
 
 class MemoryStore:
     def __init__(self, db_path):
@@ -75,7 +76,7 @@ class MemoryStore:
     def list_all(self):
         with sqlite3.connect(self.db_path) as conn:
             rows = conn.execute("SELECT text FROM core_memories ORDER BY id").fetchall()
-        return [MemoryItem(r[0]) for r in rows]
+        return [MemoryItem(r[0], r[1]) for r in rows]
 
     def count(self):
         with sqlite3.connect(self.db_path) as conn:

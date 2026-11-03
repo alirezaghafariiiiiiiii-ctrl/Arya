@@ -1,0 +1,123 @@
+"""Light-weight reasoning helpers: exact calculator and a hidden think-first step."""
+from __future__ import annotations
+
+import ast
+import logging
+import operator
+import os
+import re
+
+logger = logging.getLogger(__name__)
+
+_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٫", "01234567890123456789.")
+_DATE_RE = re.compile(r"\d{1,4}\s*[/-]\s*\d{1,2}\s*[/-]\s*\d{1,4}")
+_EXPR_RE = re.compile(r"[\d(][\d\s.+\-*/×÷^()]*[\d)]")
+_CUES = ("چند", "حساب", "محاسبه", "=")
+_HARD = (
+    "چرا", "چگونه", "فرق", "تفاوت", "مقایسه", "دلیل", "استدلال",
+    "توضیح بده", "تحلیل", "مسئله", "حل کن",
+)
+_OPS = {
+    ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+    ast.Div: operator.truediv, ast.Pow: operator.pow,
+    ast.USub: operator.neg, ast.UAdd: operator.pos,
+}
+_THINK_SYSTEM = (
+    "تو یک تحلیل‌گر دقیق هستی. سؤال کاربر را قدم‌به‌قدم بررسی کن و فقط یک "
+    "یادداشت کوتاه (حداکثر پنج جمله، فارسی) بنویس: نکته‌های مهم کدام‌اند و "
+    "چه چیزهایی را مطمئن نیستی. جواب نهایی را ننویس. اگر چیزی را نمی‌دانی، "
+    "همین را بنویس."
+)
+
+
+def _eval(node):
+    if isinstance(node, ast.Expression):
+        return _eval(node.body)
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
+            and not isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+        left, right = _eval(node.left), _eval(node.right)
+        if isinstance(node.op, ast.Pow) and abs(right) > 100:
+            raise ValueError("exponent too large")
+        return _OPS[type(node.op)](left, right)
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _OPS:
+        return _OPS[type(node.op)](_eval(node.operand))
+    raise ValueError("unsupported")
+
+
+def try_calc(text: str) -> str:
+    """Return 'expr = result' for the first arithmetic expression, or ''."""
+    t = _DATE_RE.sub(" ", text.translate(_DIGITS))
+    loose = any(cue in t for cue in _CUES)
+    for match in _EXPR_RE.finditer(t):
+        raw = match.group(0).strip()
+        expr = raw.replace("×", "*").replace("÷", "/").replace("^", "**")
+        if not re.search(r"[+*/]", expr) and not (loose and "-" in expr) \
+                and " - " not in expr:
+            continue
+        try:
+            value = _eval(ast.parse(expr, mode="eval"))
+        except (SyntaxError, ValueError, ZeroDivisionError, OverflowError, TypeError):
+            continue
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        elif isinstance(value, float):
+            value = round(value, 6)
+        return f"{raw} = {value}"
+    return ""
+
+
+_EXPR_SYSTEM = (
+    "فقط یک عبارت ریاضی با اعداد انگلیسی و عملگرهای + - * / و پرانتز بنویس که "
+    "جواب مسئله‌ی کاربر را بدهد. هیچ متن یا توضیح دیگری ننویس. "
+    "اگر مسئله‌ی حسابی نیست فقط بنویس NONE."
+)
+_WORD_CUES = ("چند", "چقدر", "مجموع", "جمع", "باقی", "هر ", "درصد", "قیمت")
+
+
+def word_math(provider, text: str) -> str:
+    """Program-aided math: the model writes the expression, code computes it."""
+    if os.environ.get("ARIA_THINK", "1") == "0":
+        return ""
+    t = _DATE_RE.sub(" ", text.translate(_DIGITS))
+    if len(re.findall(r"\d+(?:\.\d+)?", t)) < 2 or not any(c in t for c in _WORD_CUES):
+        return ""
+    try:
+        out = (provider.chat(_EXPR_SYSTEM, [{"role": "user", "content": t}]) or "").strip()
+    except Exception as error:
+        logger.warning("word math failed: %s", error)
+        return ""
+    if "NONE" in out.upper():
+        return ""
+    return try_calc(out.translate(_DIGITS) + " چند")
+
+
+def needs_thinking(text: str) -> bool:
+    if os.environ.get("ARIA_THINK", "1") == "0":
+        return False
+    t = text.strip()
+    return len(t) >= 100 or any(word in t for word in _HARD)
+
+
+def augment(provider, system_prompt: str, messages, text: str) -> str:
+    extra = []
+    calc = try_calc(text) or word_math(provider, text)
+    if calc:
+        extra.append(
+            "نتیجه‌ی محاسبه‌ی دقیق (درست است، تغییرش نده): " + calc
+            + "\nهمین نتیجه را در جواب بگو."
+        )
+    elif needs_thinking(text):
+        try:
+            notes = (provider.chat(_THINK_SYSTEM, [list(messages)[-1]]) or "").strip()
+            if notes:
+                extra.append(
+                    "یادداشت تحلیل قبلی (فقط برای کمک به جواب؛ کپی‌اش نکن و "
+                    "جواب نهایی را کوتاه بده):\n" + notes[:800]
+                )
+        except Exception as error:  # reasoning must never break the chat
+            logger.warning("think step failed: %s", error)
+    if not extra:
+        return system_prompt
+    return system_prompt + "\n\n" + "\n\n".join(extra)
