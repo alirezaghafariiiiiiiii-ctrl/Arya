@@ -7,7 +7,7 @@ from arya_core.providers import LocalProvider
 
 # لود کردن مدل و حافظه فقط یک بار در ابتدای اجرا
 print("در حال بیدار کردن آریا...")
-provider = LocalProvider(model_path=MODEL_PATH)
+provider = LocalProvider(model_path=MODEL_PATH, n_threads=4)
 memory = MemoryStore(DB_PATH)
 engine = ConversationEngine(provider=provider, memory=memory)
 
@@ -56,4 +56,4 @@ with gr.Blocks(title="Arya AI", theme=gr.themes.Soft()) as demo:
     reset_btn.click(reset_chat, None, [chatbot, msg])
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="127.0.0.1", server_port=7860)

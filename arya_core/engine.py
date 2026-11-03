@@ -27,14 +27,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "وقتی fact تازه‌ای درباره‌ی کاربر یاد می‌گیری، فقط یک بار کوتاه مثل «یادم می‌مونه» تأییدش کن."
 )
 
-MEMORY_INSTRUCTIONS = """از اطلاعات زیر برای پاسخ به کاربر استفاده کن.
-این‌ها دانسته‌های ذخیره‌شده درباره‌ی کاربر هستند، نه نقل‌قولی از پیام‌های قبلی.
-ضمیر «من» در خاطره‌ها به کاربر اشاره دارد، نه به تو. وقتی کاربر می‌پرسد «اسم من چیه؟» و خاطره می‌گوید «اسم من رضاست»، پاسخ بده «اسمت رضاست.»
-معنای جمله‌ها و علاقه‌ها را استنباط کن؛ مثلاً «عاشق غذای مادرم هستم» یعنی کاربر غذای مادرش را دوست دارد.
-اگر پرسیده شد «من از چه غذایی خوشم میاد؟» و این دانسته موجود بود، مستقیم بگو «از غذای مادرت خوشت می‌آید؛ نوع غذا مشخص نشده.» درباره‌ی کاربر با «تو» حرف بزن، نه با «من». در پاسخ به اطلاعات صریح، از «شاید» و «احتمالاً» استفاده نکن.
-جزئیات ناموجود را نساز. فقط اگر هیچ اطلاعات مرتبطی نیست بگو نمی‌دانی.
-اطلاعات:
-{memories}"""
+MEMORY_INSTRUCTIONS = 'اطلاعات ذخیره\u200cشده درباره\u200cی کاربر (فقط وقتی به سؤالش مربوط است از آن\u200cها استفاده کن؛ در سلام و گفتگوی عادی اشاره نکن):\n{memories}\nضمیر «من» در این اطلاعات یعنی کاربر؛ درباره\u200cاش با «تو» حرف بزن، مثلاً «اهل شیراز هستم» را بگو «اهل شیراز هستی». اگر اطلاعاتی نیست، بگو نمی\u200cدانی و چیزی نساز.'
 
 FACT_EXTRACTION_PROMPT = """این پیام را بررسی کن. آیا حاوی اطلاعات ماندنی و صریح درباره‌ی خود کاربر است
 (نام، شهر، شغل، علاقه، ترجیح یا واقعیت شخصی)؟
@@ -228,9 +221,14 @@ class ConversationEngine:
         if _looks_like_junk(user_text):
             return
         if hasattr(self.provider, "chat"):
+            import inspect
+            extra = {}
+            if "max_tokens" in inspect.signature(self.provider.chat).parameters:
+                extra["max_tokens"] = 80
             result = self.provider.chat(
                 FACT_EXTRACTION_PROMPT,
                 [{"role": "user", "content": user_text}],
+                **extra,
             )
         else:
             result = self.provider.generate(
@@ -240,14 +238,8 @@ class ConversationEngine:
                 )
             )
 
-        lines = [line.strip() for line in result.splitlines() if line.strip()]
-        if lines == ["NO_FACT"]:
-            return
-        facts = [line.removeprefix("FACT:").strip() for line in lines]
-        if not lines or any(
-            not line.startswith("FACT:") or len(fact.split()) < 2
-            for line, fact in zip(lines, facts)
-        ):
+        facts = _parse_facts(result)
+        if facts is None:
             logger.warning("Fact extraction returned an invalid format; no facts saved")
             return
 
@@ -307,6 +299,16 @@ class ConversationEngine:
 import re as _re
 
 
+def _parse_facts(result):
+    """None = invalid format, [] = NO_FACT, otherwise only the valid FACT lines."""
+    lines = [line.strip() for line in result.splitlines() if line.strip()]
+    if lines == ["NO_FACT"]:
+        return []
+    facts = [line[5:].strip() for line in lines if line.startswith("FACT:")]
+    facts = [fact for fact in facts if len(fact.split()) >= 2]
+    return facts or None
+
+
 def _looks_like_junk(text):
     t = text.strip()
     if len(t) > 300 or t.count("\n") >= 2:
@@ -332,36 +334,44 @@ def _is_smalltalk(text):
     return 0 < len(words) <= 3 and any(w.lower() in greet for w in words)
 
 
-MEMORY_INSTRUCTIONS = MEMORY_INSTRUCTIONS.replace(
-    "{memories}",
-    "فقط وقتی کاربر مستقیم درباره‌ی خودش می‌پرسد از این اطلاعات استفاده کن. در سلام و گفتگوی عادی به آن‌ها اشاره نکن.\n{memories}",
-)
 
 
-_orig_extract = ConversationEngine._extract_facts
+def _wrap_extract(orig):
+    def _extract(self, user_text):
+        t = user_text.strip()
+        if len(_re.findall(r"[\u0600-\u06FF]{2,}", t)) < 4 or _is_smalltalk(t):
+            return
+        return orig(self, user_text)
+    return _extract
 
 
-def _extract_if_statement(self, user_text):
-    t = user_text.strip()
-    if len(_re.findall(r"[\u0600-\u06FF]{2,}", t)) < 4 or _is_smalltalk(t):
-        return
-    return _orig_extract(self, user_text)
+def _wrap_init(orig):
+    def _init(self, *args, **kwargs):
+        orig(self, *args, **kwargs)
+        try:
+            sp = self._build_system_prompt("\u0633\u0644\u0627\u0645")
+            msgs = [{"role": "user", "content": "\u0633\u0644\u0627\u0645"}]
+            for _ in self.provider.chat_stream(sp, msgs):
+                break
+        except Exception:
+            pass
+    return _init
 
 
-ConversationEngine._extract_facts = _extract_if_statement
+ConversationEngine._extract_facts = _wrap_extract(ConversationEngine._extract_facts)
+ConversationEngine.__init__ = _wrap_init(ConversationEngine.__init__)
 
 
-_orig_engine_init = ConversationEngine.__init__
+def _wrap_web(orig):
+    def _build(self, user_text):
+        prompt = orig(self, user_text)
+        try:
+            from . import web
+            extra = web.context_for(user_text)
+        except Exception:
+            extra = ""
+        return prompt + "\n\n" + extra if extra else prompt
+    return _build
 
 
-def _init_prewarm(self, *args, **kwargs):
-    _orig_engine_init(self, *args, **kwargs)
-    try:
-        sp = self._build_system_prompt("سلام")
-        for _ in self.provider.chat_stream(sp, [{"role": "user", "content": "سلام"}]):
-            break
-    except Exception:
-        pass
-
-
-ConversationEngine.__init__ = _init_prewarm
+ConversationEngine._build_system_prompt = _wrap_web(ConversationEngine._build_system_prompt)
