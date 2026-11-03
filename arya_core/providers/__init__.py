@@ -119,3 +119,28 @@ class LocalProvider(Provider):
         if not isinstance(content, str):
             raise ProviderError("پاسخ نامعتبر از مدل محلی (متن پاسخ رشته نیست)")
         return content.strip()
+
+
+
+# --- پاسخ جریانی (streaming): تکه‌تکه و هم‌زمان با تولید ---
+def _local_chat_stream(self, system_prompt, messages):
+    llm = getattr(self, "llm", None) or getattr(self, "_llm", None)
+    formatted = [{"role": "system", "content": system_prompt}]
+    formatted.extend(messages)
+    stream = llm.create_chat_completion(
+        messages=formatted,
+        temperature=0.3,
+        top_p=0.9,
+        top_k=40,
+        max_tokens=150,
+        repeat_penalty=1.15,
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk["choices"][0].get("delta", {})
+        piece = delta.get("content")
+        if piece:
+            yield piece
+
+
+LocalProvider.chat_stream = _local_chat_stream

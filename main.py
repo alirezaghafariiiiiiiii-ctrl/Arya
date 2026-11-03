@@ -4,6 +4,7 @@ from arya_core.config import DB_PATH, MODEL_PATH
 from arya_core.memory import MemoryStore
 from arya_core.engine import ConversationEngine
 from arya_core.providers import LocalProvider, EchoProvider
+from arya_core.streaming import stream_response
 
 def build_provider():
     name = os.getenv("ARIA_PROVIDER", "").lower()
@@ -39,8 +40,10 @@ def main():
                 print(f"تعداد خاطرات: {memory.count()}")
                 continue
             
-            response = engine.generate_response(text)
-            print(f"ARIA: {response}")
+            print("ARIA: ", end="", flush=True)
+            for piece in stream_response(engine, text):
+                print(piece, end="", flush=True)
+            print()
             
         except KeyboardInterrupt:
             print("\nخداحافظ!")

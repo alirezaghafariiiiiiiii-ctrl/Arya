@@ -217,6 +217,8 @@ class ConversationEngine:
         return reply.strip()
 
     def _extract_facts(self, user_text: str) -> None:
+        if _looks_like_junk(user_text):
+            return
         if hasattr(self.provider, "chat"):
             result = self.provider.chat(
                 FACT_EXTRACTION_PROMPT,
@@ -242,10 +244,11 @@ class ConversationEngine:
             return
 
         for fact in facts:
-            self.memory.add(fact)
+            if _fact_is_grounded(fact, user_text):
+                self.memory.add(fact)
 
     def _build_system_prompt(self, user_text: str) -> str:
-        recalled = self.memory.search(user_text, limit=self.max_recalled)
+        recalled = [] if _is_smalltalk(user_text) else self.memory.search(user_text, limit=self.max_recalled)
         memories = (
             "\n".join(f"- {item.text}" for item in recalled)
             if recalled
@@ -291,3 +294,37 @@ class ConversationEngine:
                 self.session_id = self.session_store.create_session()
             return "تاریخچه گفتگو پاک شد."
         return "دستور ناشناخته. /help را بزن."
+
+
+import re as _re
+
+
+def _looks_like_junk(text):
+    t = text.strip()
+    if len(t) > 300 or t.count("\n") >= 2:
+        return True
+    if t.endswith(("?", "؟")):
+        return True
+    return bool(_re.search(r"[=(){}\[\]_<>/\\]|\.py\b|\.txt\b|\bimport\b|\bdef\b|\bgit |\bpip |\$ ", t))
+
+
+def _fact_is_grounded(fact, user_text):
+    if _looks_like_junk(fact):
+        return False
+    if len(_re.findall(r"[\u0600-\u06FF]", fact)) < 5:
+        return False
+    def words(s):
+        return set(_re.findall(r"[\u0600-\u06FF]{2,}", s.replace("\u200c", " ")))
+    return len(words(fact) & words(user_text)) >= 2
+
+
+def _is_smalltalk(text):
+    words = _re.findall(r"[\u0600-\u06FFA-Za-z]+", text.replace("\u200c", " "))
+    greet = {"سلام", "درود", "hi", "hello", "hey", "مرسی", "ممنون", "خداحافظ", "خوبی", "چطوری"}
+    return 0 < len(words) <= 3 and any(w.lower() in greet for w in words)
+
+
+MEMORY_INSTRUCTIONS = MEMORY_INSTRUCTIONS.replace(
+    "{memories}",
+    "فقط وقتی کاربر مستقیم درباره‌ی خودش می‌پرسد از این اطلاعات استفاده کن. در سلام و گفتگوی عادی به آن‌ها اشاره نکن.\n{memories}",
+)

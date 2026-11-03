@@ -38,3 +38,22 @@ _BUILD_PATTERNS = (
 def is_build_request(text: str) -> bool:
     normalized = text.replace("\u200c", " ").lower()
     return any(_re.search(p, normalized) for p in _BUILD_PATTERNS)
+
+
+_STREAM_MARKERS = ("```", "~~~", "![", "<svg", "<html", "<script", "<!doctype", "data:image/")
+_STREAM_HOLD = max(len(m) for m in _STREAM_MARKERS) - 1
+
+
+def guard_stream(chunks):
+    """فیلتر خروجی برای پاسخ جریانی؛ چند نویسه‌ی آخر را نگه می‌دارد تا نشانه‌ی بین دو تکه هم گرفته شود."""
+    buffer = ""
+    for chunk in chunks:
+        buffer += chunk
+        if any(m in buffer.lower() for m in _STREAM_MARKERS):
+            yield REFUSAL
+            return
+        if len(buffer) > _STREAM_HOLD:
+            yield buffer[:-_STREAM_HOLD]
+            buffer = buffer[-_STREAM_HOLD:]
+    if buffer:
+        yield buffer
